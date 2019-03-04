@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
+import numba
+from numba import jit
 import math as ma
 
 
@@ -55,22 +57,43 @@ def convolve_gauss(g, h, img, rad, sigma):
 
 
 # A function to create a series of reduced images
-def create_image_pyramid(original_image):
+def create_image_pyramid(original_image, cross_corr=False):
+    t_pyr = []
     pyramid = []
 
     # find how many times we can divide the minimum dimension by two
     width = original_image.shape[0]
     height = original_image.shape[1]
-    log_dim = ma.floor(ma.log2(min([width, height])))-1
+    log_dim = ma.floor(ma.log2(min([width, height])))-2
 
     # of course we want to look for the original image
-    pyramid.append(original_image)
+    t_pyr.append(original_image)
 
     # append reduced images
     for n in range(log_dim):
-        pyramid.append(reduced_gaussian_image(pyramid[n]))
+        t_pyr.append(reduced_gaussian_image(t_pyr[n]))
+    # Lucas' code
+    if cross_corr:
+        for n in range(log_dim):
+            continue
+    else:
+        # find z-score of template
+        for n in t_pyr:
+            i_mean = np.mean(n)
+            i_std_dev = np.std(n)
+            pyramid.append(z_normalize(n, i_mean, i_std_dev))
 
     return pyramid
+
+
+# returns a normalized array
+@jit(nopython=True)
+def z_normalize(img, m, s_dev):
+    normalized_array = np.zeros(img.shape)
+    for i in range(img.shape[0]):
+        for j in range(img.shape[1]):
+            normalized_array[i, j] = (img[i, j] - m) / s_dev
+    return normalized_array
 
 
 def reduced_gaussian_image(image):
@@ -82,8 +105,30 @@ def reduced_gaussian_image(image):
     for b in range(0, reduced_image.shape[0]):
         for c in range(0, reduced_image.shape[1]):
             reduced_image[b, c] = g_img[b*2, c*2]+g_img[b*2+1, c*2]+g_img[b*2, c*2+1]+g_img[b*2+1, c*2+1]/4.0
-            
+
     return reduced_image
+
+
+@jit(nopython=True)
+def slide_image(target, template):
+    dim1, dim2 = template.shape
+    errors = []
+    # iterate from zero to len(img)-len(template)
+    for i in range(0, int(target.shape[0]-dim1)):
+        for j in range(0, int(target.shape[1]-dim2)):
+            img = target[i:i+dim1, j:j+dim2]
+            errors.append(((i, j), sse(img, template)))
+    return errors
+
+
+# returns the sum square error of two images of equal shape
+@jit(nopython=True, parallel=True)
+def sse(img1, img2):
+    error = 0.0
+    for i in range(img1.shape[0]):
+        for j in range(img1.shape[1]):
+            error += np.square(img1[i, j]-img2[i, j])
+    return error
 
 
 # with images always use try with resources. This ensures that the image closes when it's not longer in use.
@@ -92,8 +137,29 @@ with Image.open("waldo_template.jpg") as waldo_face:
     w = np.array(waldo_face)
     w = np.mean(w, -1)
 
-    img_pyr = create_image_pyramid(w)
+img_pyr = create_image_pyramid(w)
 
-    for x in img_pyr:
-        plt.imshow(x, cmap="Greys_r")
-        plt.show()
+# for img in img_pyr:
+#     plt.imshow(img, cmap="Greys_r")
+#     plt.show()
+
+with Image.open("waldo_1.jpg") as t:
+    original = t
+    targ = np.array(t)
+    targ = np.mean(targ, -1)
+mean = np.mean(targ)
+std_dev = np.std(targ)
+targ = z_normalize(targ, mean, std_dev)
+pred = []
+for im in img_pyr:
+    pred.append(min(slide_image(targ, im), key=lambda p: p[1]))
+    print(pred)
+
+for e in pred:
+    print(e)
+
+with Image.open("waldo_1.jpg") as t:
+    plt.imshow(t)
+for e in pred:
+    plt.plot(e[0][1], e[0][0], 'og-', fillstyle="none", linewidth=4, markersize=15)
+plt.savefig('filename.png', dpi=1600)
