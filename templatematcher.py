@@ -64,7 +64,7 @@ def create_image_pyramid(original_image, cross_corr=False):
     # find how many times we can divide the minimum dimension by two
     width = original_image.shape[0]
     height = original_image.shape[1]
-    log_dim = ma.floor(ma.log2(min([width, height])))-2
+    log_dim = ma.floor(ma.log2(min([width, height])))-4
 
     # of course we want to look for the original image
     t_pyr.append(original_image)
@@ -117,7 +117,7 @@ def slide_image(target, template):
     for i in range(0, int(target.shape[0]-dim1)):
         for j in range(0, int(target.shape[1]-dim2)):
             img = target[i:i+dim1, j:j+dim2]
-            errors.append(((i, j), sse(img, template)))
+            errors.append(((i+(dim1/2), j+(dim2/2)), sse(img, template)))
     return errors
 
 
@@ -147,19 +147,19 @@ with Image.open("waldo_1.jpg") as t:
     original = t
     targ = np.array(t)
     targ = np.mean(targ, -1)
+# normalize target image
 mean = np.mean(targ)
 std_dev = np.std(targ)
 targ = z_normalize(targ, mean, std_dev)
+
 pred = []
 for im in img_pyr:
     pred.append(min(slide_image(targ, im), key=lambda p: p[1]))
-    print(pred)
-
-for e in pred:
-    print(e)
-
+best_pred = min(pred, key=lambda p:p[1])
 with Image.open("waldo_1.jpg") as t:
     plt.imshow(t)
-for e in pred:
-    plt.plot(e[0][1], e[0][0], 'og-', fillstyle="none", linewidth=4, markersize=15)
+# for e in pred:
+#    plt.plot(e[0][1], e[0][0], 'og-', fillstyle="none", linewidth=4, markersize=15)
+
+plt.plot(best_pred[0][1], best_pred[0][0], 'og', fillstyle="none", linewidth=5, markersize=15)
 plt.savefig('filename.png', dpi=1600)
